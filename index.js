@@ -26,14 +26,36 @@ io.on("connection", (socket) => {
     io.emit("created", "Cliente whatsapp inicializado");
 
     socket.on("sendMsg", (number, msg, callback) => {
-      client
-        .sendText(number + "@c.us", msg)
-        .then((data) => {
-          callback(data);
-        })
-        .catch((error) => {
-          console.log(error, { number, msg, callback });
-        });
+      const sendpath = __dirname + "/files/send/send.png";
+
+      if (fs.existsSync(sendpath)) {
+        client
+          .sendImage(number + "@c.us", sendpath, "Foto", msg)
+          .then((data) => {
+            fs.unlink(sendpath, (error) => {
+              console.log(error);
+            });
+            callback(data);
+          })
+          .catch((error) => {
+            console.log(error);
+          });
+      } else {
+        client
+          .sendText(number + "@c.us", msg)
+          .then((data) => {
+            callback(data);
+          })
+          .catch((error) => {
+            console.log(error);
+          });
+      }
+    });
+
+    socket.on("sendChunks", (chunks) => {
+      fs.appendFileSync(__dirname + "/files/send/send.png", chunks, (error) => {
+        if (error !== null) console.log(error);
+      });
     });
 
     client.onMessage(async (msg) => {
@@ -45,7 +67,7 @@ io.on("connection", (socket) => {
           msg.mimetype
         )}`;
 
-        filepath = `/files/${filename}`;
+        filepath = `/files/received/${filename}`;
         await fs.writeFile(__dirname + filepath, buffer, (error) => {
           console.log(error);
         });

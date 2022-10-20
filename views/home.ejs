@@ -74,9 +74,11 @@
         <div class="col-8">
           <div>
             <input
-              class="form-control form-control-lg d-none"
+              class="form-control form-control-lg"
               id="anexo"
               type="file"
+              accept="image/*"
+              onchange="saveFile()"
             />
           </div>
         </div>
@@ -162,6 +164,22 @@
           new bootstrap.Toast(msgToast).show();
         }
       );
+    }
+
+    function saveFile() {
+      const file = document.querySelector("input[type=file]").files[0];
+
+      if (file !== undefined) {
+        let startPointer = 0;
+        let endPointer = file.size;
+
+        while (startPointer < endPointer) {
+          let newStartPointer = startPointer + 1024 * 10;
+          socket.emit("sendChunks", file.slice(startPointer, newStartPointer));
+
+          startPointer = newStartPointer;
+        }
+      }
     }
 
     socket.on("newMsg", (msg) => {
