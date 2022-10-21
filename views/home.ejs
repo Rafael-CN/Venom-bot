@@ -38,51 +38,79 @@
         </div>
       </div>
 
-      <div class="row">
-        <div class="col">
-          <input
-            id="telefone"
-            class="form-control form-control-lg"
-            type="text"
-            placeholder="Telefone"
-            aria-label=".form-control-lg example"
-          />
-        </div>
-        <div class="col">
-          <input
-            id="mensagem"
-            class="form-control form-control-lg"
-            type="text"
-            placeholder="Mensagem"
-            aria-label=".form-control-lg example"
-          />
-        </div>
-        <div class="col">
-          <button
-            id="enviarMsg"
-            type="button"
-            class="btn btn-lg btn-success"
-            onclick="sendMsg()"
-            disabled
-          >
-            Enviar mensagem
-          </button>
-        </div>
-      </div>
-
-      <div class="row mt-4">
-        <div class="col-8">
-          <div>
+      <section id="formulario_mensagem">
+        <div class="row">
+          <div class="col-1">
+            <select
+              id="pais"
+              class="form-select form-select-lg mb-3"
+              aria-label=".form-select-lg example"
+            >
+              <option value="55">BR</option>
+            </select>
+          </div>
+          <div class="col-1">
+            <select
+              id="regiao"
+              class="form-select form-select-lg mb-3"
+              aria-label=".form-select-lg example"
+            >
+              <option value="53">RS</option>
+            </select>
+          </div>
+          <div class="col-2">
             <input
+              id="telefone"
               class="form-control form-control-lg"
-              id="anexo"
-              type="file"
-              accept="image/*"
-              onchange="saveFile()"
+              type="text"
+              placeholder="Telefone"
+              aria-label=".form-control-lg example"
             />
           </div>
+          <div class="col-6">
+            <input
+              id="mensagem"
+              class="form-control form-control-lg"
+              type="text"
+              placeholder="Mensagem"
+              aria-label=".form-control-lg example"
+            />
+          </div>
+          <div class="col-2">
+            <button
+              id="enviarMsg"
+              type="button"
+              class="btn btn-lg btn-success"
+              onclick="sendMsg()"
+              disabled
+            >
+              Enviar mensagem
+            </button>
+          </div>
         </div>
-      </div>
+
+        <div class="row mt-4">
+          <div class="col-8">
+            <div>
+              <input
+                class="form-control form-control-lg"
+                id="anexo"
+                type="file"
+                onchange="saveFile()"
+              />
+            </div>
+          </div>
+          <div class="col">
+            <button
+              id="removerArquivo"
+              class="btn btn-outline-danger rounded-circle btn-lg d-none"
+              onclick="removeFile()"
+            >
+              <i class="fa-solid fa-times"></i>
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3">
@@ -142,6 +170,14 @@
   </body>
 
   <script>
+    jQuery.fn.removeClassStarts = function (startName) {
+      $(this).removeClass(function (index, className) {
+        return (
+          className.match(new RegExp(`(^|\\s)${startName}\\S+`, "g")) || []
+        ).join(" ");
+      });
+    };
+
     const socket = io("http://localhost:3001");
     socket.on("connection");
 
@@ -154,35 +190,82 @@
       $("#enviarMsg").removeAttr("disabled");
     });
 
+    function disableMsg(disabled) {
+      $("#formulario_mensagem")
+        .find("input, button, select")
+        .attr("disabled", disabled);
+    }
+
     function sendMsg() {
-      socket.emit(
-        "sendMsg",
-        $("#telefone").val(),
-        $("#mensagem").val(),
-        (data) => {
-          const msgToast = document.getElementById("msgToast");
-          new bootstrap.Toast(msgToast).show();
-        }
-      );
+      disableMsg(true);
+
+      const telefone =
+        $("#pais").val() + $("#regiao").val() + $("#telefone").val();
+
+      socket.emit("sendMsg", telefone, $("#mensagem").val(), (data) => {
+        showMsgToast("A mensagem foi enviada com sucesso", "success");
+        disableMsg(false);
+      });
+    }
+
+    function showMsgToast(msg, type) {
+      $("#msgToast").removeClassStarts("text-bg-");
+
+      $("#msgToast .toast-body").text(msg);
+      $("#msgToast").addClass("text-bg-" + type);
+
+      new bootstrap.Toast($("#msgToast")).show();
+    }
+
+    function verifyFile(file) {
+      if (file.size / 10 ** 6 > 16) {
+        $("#anexo").addClass("is-invalid");
+        showMsgToast(
+          "O arquivo ultrapassa o limite do whatsapp de 16mb",
+          "danger"
+        );
+        return false;
+      } else {
+        $("#anexo").removeClass("is-invalid");
+        return true;
+      }
     }
 
     function saveFile() {
       const file = document.querySelector("input[type=file]").files[0];
 
       if (file !== undefined) {
+        if (!verifyFile(file)) return;
+
+        socket.emit("createFile", file.type);
+
         let startPointer = 0;
         let endPointer = file.size;
 
         while (startPointer < endPointer) {
           let newStartPointer = startPointer + 1024 * 10;
-          socket.emit("sendChunks", file.slice(startPointer, newStartPointer));
+
+          socket.emit(
+            "sendChunks",
+            file.type,
+            file.slice(startPointer, newStartPointer)
+          );
 
           startPointer = newStartPointer;
         }
+
+        $("#removerArquivo").removeClass("d-none");
       }
     }
 
+    function removeFile() {
+      socket.emit("removeFile");
+      $("#anexo").val("");
+      $("#removerArquivo").addClass("d-none");
+    }
+
     socket.on("newMsg", (msg) => {
+      console.log(msg);
       $("#newToast img").attr("src", msg.sender.profilePicThumbObj.eurl);
       $("#newToast .toast-header strong").text(msg.sender.displayName);
 

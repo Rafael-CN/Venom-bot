@@ -10,7 +10,6 @@ const fs = require("fs");
 const mime = require("mime-types");
 
 app.set("view engine", "ejs");
-
 app.get("/home", (_req, res) => {
   res.render("home");
 });
@@ -19,62 +18,124 @@ server.listen(port, () => {
   console.log(`Escutando a porta ${port}`);
 });
 
+var wppClient;
+var socketClient;
+
+function getExtension(mimetype) {
+  const type = mimetype.split("/")[0];
+  switch (type) {
+    case "image":
+      return "png";
+    case "audio":
+      return "mp3";
+    case "video":
+      return "mp4";
+    default:
+      return mime.extension(mimetype);
+  }
+}
+
 io.on("connection", (socket) => {
-  console.log(`Usuário conectado: ${socket.id}`);
+  socketClient = socket;
 
-  venom.create().then((client) => {
-    io.emit("created", "Cliente whatsapp inicializado");
+  async function notifyMsg(msg) {
+    let filepath = "";
+    if (!(msg.mimetype === undefined)) {
+      const buffer = await wppClient.decryptFile(msg);
 
-    socket.on("sendMsg", (number, msg, callback) => {
-      const sendpath = __dirname + "/files/send/send.png";
+      const filename = `${new Date().getTime()}.${mime.extension(
+        msg.mimetype
+      )}`;
 
-      if (fs.existsSync(sendpath)) {
-        client
-          .sendImage(number + "@c.us", sendpath, "Foto", msg)
-          .then((data) => {
-            fs.unlink(sendpath, (error) => {
-              console.log(error);
-            });
-            callback(data);
-          })
-          .catch((error) => {
-            console.log(error);
-          });
-      } else {
-        client
-          .sendText(number + "@c.us", msg)
-          .then((data) => {
-            callback(data);
-          })
-          .catch((error) => {
-            console.log(error);
-          });
-      }
-    });
+      filepath = `/files/received/${filename}`;
+      fs.writeFileSync(__dirname + filepath, buffer);
+    }
 
-    socket.on("sendChunks", (chunks) => {
-      fs.appendFileSync(__dirname + "/files/send/send.png", chunks, (error) => {
-        if (error !== null) console.log(error);
+    msg.mediaPath = filepath;
+    socketClient.emit("newMsg", msg);
+  }
+
+  if (wppClient === undefined) {
+    venom.create().then((client) => {
+      wppClient = client;
+
+      socketClient.emit("created", "Cliente whatsapp inicializado");
+
+      wppClient.onMessage((msg) => {
+        notifyMsg(msg);
       });
     });
+  } else {
+    socketClient.emit("created", "Cliente whatsapp inicializado");
+  }
 
-    client.onMessage(async (msg) => {
-      let filepath = "";
-      if (!(msg.mimetype === undefined)) {
-        const buffer = await client.decryptFile(msg);
+  socketClient.on("sendMsg", (number, msg, callback) => {
+    const sendDir = __dirname + "/files/send";
+    const files = fs.readdirSync(__dirname + "/files/send");
 
-        const filename = `${new Date().getTime()}.${mime.extension(
-          msg.mimetype
-        )}`;
+    if (files.length > 0) {
+      const sendpath = `${sendDir}/${files[0]}`;
 
-        filepath = `/files/received/${filename}`;
-        await fs.writeFile(__dirname + filepath, buffer, (error) => {
-          console.log(error);
-        });
+      sendFile(number, sendpath, msg, callback);
+    } else {
+      sendText(number, msg, callback);
+    }
+  });
+
+  function sendText(number, msg, callback) {
+    wppClient
+      .sendText(number + "@c.us", msg)
+      .then((data) => {
+        callback(data);
+      })
+      .catch((error) => {
+        console.log(error);
+      });
+  }
+
+  function sendFile(number, sendpath, msg, callback) {
+    wppClient
+      .sendFile(
+        number + "@c.us",
+        sendpath,
+        undefined,
+        msg !== "" ? msg : undefined
+      )
+      .then((data) => {
+        fs.unlinkSync(sendpath);
+        callback(data);
+      })
+      .catch((error) => {
+        console.log(error);
+      });
+  }
+
+  function removeSendFile() {
+    const sendDir = __dirname + "/files/send/";
+    const files = fs.readdirSync(sendDir);
+
+    if (files.length > 0) fs.unlinkSync(sendDir + files[0]);
+  }
+
+  socketClient.on("createFile", (mimetype) => {
+    removeSendFile();
+
+    fs.closeSync(
+      fs.openSync(__dirname + "/files/send/file." + getExtension(mimetype), "w")
+    );
+  });
+
+  socketClient.on("removeFile", () => {
+    removeSendFile();
+  });
+
+  socketClient.on("sendChunks", (mimetype, chunks) => {
+    fs.appendFileSync(
+      __dirname + "/files/send/file." + getExtension(mimetype),
+      chunks,
+      (error) => {
+        if (error !== null) console.log(error);
       }
-
-      msg.mediaPath = filepath;
-      io.emit("newMsg", msg);
-    });
+    );
   });
 });
